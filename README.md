@@ -260,15 +260,6 @@ COCO Dataset, YOLO framework, OpenCV, PIL, Click, pytest
 | Helicopter | UH60, AH64, CH47 | Utility, Attack, Heavy-lift |
 | Business | Citation, Gulfstream | Light, Medium, Large |
 
-### Standard Resolutions
-
-| Name | Resolution | Aspect | MP |
-|------|------------|--------|-----|
-| VGA | 640×480 | 4:3 | 0.31 |
-| HD | 1280×720 | 16:9 | 0.92 |
-| FHD | 1920×1080 | 16:9 | 2.07 |
-| 4K | 3840×2160 | 16:9 | 8.29 |
-
 ### File Naming
 - **Images:** `{type}_{id}_{resolution}.{ext}`
 - **Annotations:** `{image_basename}.json`
