@@ -6,6 +6,6 @@ def filter(input_path: Path, output_path: Path, filter_criteria: str):
     pass
 
 
-def filter_check(output_path: Path) -> bool:
+def filter_check(output_path: Path, filter_criteria: str) -> bool:
     """Check if the filtered dataset meets the criteria."""
     pass
