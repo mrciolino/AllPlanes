@@ -17,6 +17,7 @@ console.print(
 
 import time
 import typer
+import traceback
 import prompt_toolkit
 from pathlib import Path
 from typing import Tuple, List
@@ -59,7 +60,8 @@ class FilterCriteria:
     @staticmethod
     def prompt_class_criteria() -> str:
         """Prompt for class-based filter criteria."""
-        available_classes = load_classes(os.path.join(DEFAULT_INPUT_PATH, "classes.txt"))  # change this to load from dataset directory
+        classes_path = Path(os.path.join(DEFAULT_INPUT_PATH, "classes.txt"))
+        available_classes = load_classes(console, classes_path)
         console.print(f"Available classes: [bold]{', '.join(available_classes)}[/bold]")
         while True:
             aircraft_class = typer.prompt("Enter comma separated classes (e.g., B737, MG21)")
@@ -156,6 +158,7 @@ class DatasetOperations:
 
         except Exception as e:
             console.print(f"[bold red]❌ An error occurred during conversion:[/bold red] {e}")
+            console.print(traceback.format_exc())
 
     @staticmethod
     def filter_dataset(input_path: Path, output_path: Path, filter_criteria: str) -> None:
@@ -169,7 +172,7 @@ class DatasetOperations:
             )
             filter.apply_filters()
 
-            if not filter.check_filters(output_path):
+            if not filter.check_output(filter.df):
                 console.print(f"[bold red]❌ Filtering completed but check failed at:[/bold red] {output_path}")
                 return
 
@@ -177,6 +180,7 @@ class DatasetOperations:
 
         except Exception as e:
             console.print(f"[bold red]❌ An error occurred during filtering:[/bold red] {e}")
+            console.print(traceback.format_exc())
 
     @staticmethod
     def download_dataset(url: str, output_path: Path) -> None:
@@ -192,6 +196,7 @@ class DatasetOperations:
 
         except Exception as e:
             console.print(f"[bold red]❌ An error occurred during download:[/bold red] {e}")
+            console.print(traceback.format_exc())
 
     @staticmethod
     def visualize_dataset(input_path: Path) -> None:
@@ -209,6 +214,7 @@ class DatasetOperations:
             print("❌ FiftyOne not installed. Please install with: [bold red]pip install fiftyone[/bold red]")
         except Exception as e:
             print(f"[bold red]❌ An error occurred during visualization:[/bold red] {e}")
+            console.print(traceback.format_exc())
 
 
 class CommandHandlers:
@@ -226,7 +232,7 @@ class CommandHandlers:
             Panel.fit(
                 "[bold yellow]🔄 You selected: Convert[/bold yellow]\n"
                 "[dim]Convert annotation formats between supported types (e.g., JSON, YOLO, COCO, HBB, OBB).[/dim]",
-                border_style="bold",
+                border_style="bold blue",
             )
         )
         to_framework = self.ui.choice("Enter target framework [(1) yolo, (2) coco]", ["yolo", "coco"], default="yolo")
@@ -242,7 +248,7 @@ class CommandHandlers:
         console.print(
             Panel.fit(
                 "[bold green]🧹 You selected: Filter[/bold green]\n" "[dim]Filter the dataset by criteria such as size or class.[/dim]",
-                border_style="bold",
+                border_style="bold blue",
             )
         )
 
@@ -255,13 +261,13 @@ class CommandHandlers:
             color = self.filter_criteria.COLOR_MAP[filter_type]
             filter_sequence.append(f"[bold {color}]{filter_type}[/bold {color}]")
             criteria_list.append(self.filter_criteria.get_criteria(filter_type))
-            console.print(Panel.fit(f"[bold green]🧹 Applying filters:[/bold green] " + ", ".join(filter_sequence), border_style="bold"))
-            if not typer.confirm("Add another filter?", default=False):
+            console.print(Panel.fit(f"[bold green]🧹 Applying filters:[/bold green] " + ", ".join(filter_sequence), border_style="bold blue"))
+            if not typer.confirm("\nAdd another filter?", default=False):
                 break
         full_criteria = " | ".join(criteria_list)
 
         # Confirm filtering
-        if not typer.confirm(f"Confirm filtering with criteria: {full_criteria}?", default=True):
+        if not typer.confirm(f"\nConfirm filtering with criteria: {full_criteria}?", default=True):
             console.print("[bold red]❌ Filtering cancelled by user.[/bold red]")
             return
         console.print(f"[bold green]🧹 Filtering with criteria:[/bold green] [bold blue]{full_criteria}[/bold blue]")
@@ -273,7 +279,7 @@ class CommandHandlers:
             Panel.fit(
                 "[bold magenta]⬇️  You selected: Download[/bold magenta]\n"
                 "[dim]Download the latest AllPlanes dataset from the official source.[/dim]",
-                border_style="bold",
+                border_style="bold blue",
             )
         )
 
