@@ -1,39 +1,49 @@
 """AllPlanes CLI: Convert, download, filter, and visualize aircraft datasets."""
 
-from typing import Tuple, List
-from pathlib import Path
-import time
-
-import typer
+import os
 from rich import print
 from rich.panel import Panel
 from rich.console import Console
-from prompt_toolkit import prompt
-from prompt_toolkit.completion import PathCompleter
 
-from src.filter import filter, filter_check
-from src.download import download, download_check
+console = Console()
+console.clear()
+console.print(
+    Panel.fit(
+        "[bold blue]     ✈️  Welcome to AllPlanes Dataset Tool ✈️[/bold blue]\n" "[dim]This CLI tool helps manage the AllPlanes dataset.[/dim]",
+        border_style="bold blue",
+        padding=(1, 20),
+    )
+)
+
+import time
+import typer
+import prompt_toolkit
+from pathlib import Path
+from typing import Tuple, List
+
+from src.filter import FilterManager
 from src.convert import ConversionManager
 from src.utils import validate_dataset_path
+from src.download import download, download_check
+from src.utils import load_classes
 
 # Constants
 CLI_TEMP_WAIT_TIME = 1  # seconds
 ALLPLANES_DATASET_URL = "https://allplanes.org/dataset"
 DEFAULT_INPUT_PATH = "data/example"
 DEFAULT_OUTPUT_PATH = "output/"
-available_classes = [line.strip() for line in open("data/example/classes.txt") if line.strip()]
 
-# Initialize Typer app
+# Initialize Typer app and global console
 app = typer.Typer(help="AllPlanes CLI: convert, download, or filter datasets", add_completion=False)
 
 
 class FilterCriteria:
     """Handle filter criteria generation and validation."""
 
-    COLOR_MAP = {"size": "yellow", "class": "blue", "category": "magenta"}
+    COLOR_MAP = {"size": "yellow", "class": "blue"}
 
     @staticmethod
-    def prompt_size_criteria(console: Console) -> str:
+    def prompt_size_criteria() -> str:
         """Prompt for size-based filter criteria."""
         min_ws = typer.prompt("Min wingspan (meters) [type 'all' for no minimum]", default="20")
         max_ws = typer.prompt("Max wingspan (meters) [type 'all' for no maximum]", default="80")
@@ -47,8 +57,9 @@ class FilterCriteria:
         return f"size: wingspan={min_ws}-{max_ws}, length={min_len}-{max_len}"
 
     @staticmethod
-    def prompt_class_criteria(console: Console) -> str:
+    def prompt_class_criteria() -> str:
         """Prompt for class-based filter criteria."""
+        available_classes = load_classes(os.path.join(DEFAULT_INPUT_PATH, "classes.txt"))  # change this to load from dataset directory
         console.print(f"Available classes: [bold]{', '.join(available_classes)}[/bold]")
         while True:
             aircraft_class = typer.prompt("Enter comma separated classes (e.g., B737, MG21)")
@@ -59,59 +70,42 @@ class FilterCriteria:
             else:
                 return f"classes: {', '.join(selected)}"
 
-    @staticmethod
-    def prompt_category_criteria(console: Console) -> str:
-        """Prompt for category-based filter criteria."""
-        categories = ["Jumbo Jet", "Private Jet", "Cargo", "Military", "Regional", "Helicopter"]
-        console.print(f"Available categories: [bold]{', '.join(categories)}[/bold]")
-        while True:
-            category_input = typer.prompt("Enter comma separated categories", default="Jumbo Jet")
-            selected = [cat.strip() for cat in category_input.split(",") if cat.strip()]
-            invalid = [cat for cat in selected if cat not in categories]
-            if invalid:
-                print(f"[bold red]❌ Invalid category(ies): {', '.join(invalid)}. Choose only from available categories.[/bold red]")
-            else:
-                category = ", ".join(selected)
-                break
-        return f"categories: {category}"
-
     @classmethod
-    def get_criteria(cls, criterion: str, console: Console) -> str:
+    def get_criteria(cls, criterion: str) -> str:
         """Get filter criteria based on type."""
         criteria_map = {
             "size": cls.prompt_size_criteria,
             "class": cls.prompt_class_criteria,
-            "category": cls.prompt_category_criteria,
         }
 
         if criterion not in criteria_map:
             console.print(f"[bold red]❌ Unknown filter type: {criterion}[/bold red]")
             time.sleep(CLI_TEMP_WAIT_TIME)
-            return cls.get_criteria(criterion, console)
+            return cls.get_criteria(criterion)
 
-        return criteria_map[criterion](console)
+        return criteria_map[criterion]()
 
 
 class UIHelper:
     """Helper class for user interface operations."""
 
     @staticmethod
-    def get_directory_io(console: Console, default_input: str = DEFAULT_INPUT_PATH, default_output: str = DEFAULT_OUTPUT_PATH) -> Tuple[Path, Path]:
+    def get_directory_io(default_input: str = DEFAULT_INPUT_PATH, default_output: str = DEFAULT_OUTPUT_PATH) -> Tuple[Path, Path]:
         console.print(
             Panel.fit(
-                "[bold]📂 Directory Input/Output 📂[/bold]\n" "[dim]Use [tab] to autocomplete input and output directories.[/dim]",
+                "[bold]📂 Directory Input/Output 📂[/bold]\n" "[dim]Use {tab} to autocomplete input and output directories.[/dim]",
                 border_style="bold blue",
             )
         )
-        input_path = prompt(
+        input_path = prompt_toolkit.prompt(
             f"Enter dataset path [{default_input}]: ",
             default=default_input,
-            completer=PathCompleter(only_directories=True, expanduser=True),
+            completer=prompt_toolkit.completion.PathCompleter(only_directories=True, expanduser=True),
         )
-        output_path = prompt(
+        output_path = prompt_toolkit.prompt(
             f"Enter output directory [{default_output}]: ",
             default=default_output,
-            completer=PathCompleter(only_directories=True, expanduser=True),
+            completer=prompt_toolkit.completion.PathCompleter(only_directories=True, expanduser=True),
         )
 
         if not validate_dataset_path(console, Path(input_path)):
@@ -130,12 +124,11 @@ class UIHelper:
             print(f"[bold red]❌ Invalid choice: {user_choice}. Choose from {choices}.[/bold red]")
 
     @staticmethod
-    def print_filter_menu(console: Console) -> None:
+    def print_filter_menu() -> None:
         """Display filter menu options."""
         console.print("[bold]Choose a filter type:[/bold]")
         console.print("1. [bold yellow]size[/bold yellow]     - Filter Wingspan and Length in meters")
         console.print("2. [bold blue]class[/bold blue]    - Selected Aircraft Classes to include (e.g., [cyan]B737, A321[/cyan])")
-        console.print("3. [bold magenta]category[/bold magenta] - Category (e.g., [cyan]Jumbo Jet, Private Jet[/cyan])")
 
 
 class DatasetOperations:
@@ -146,6 +139,7 @@ class DatasetOperations:
         """Convert annotation formats between diamond, hbb, and obb."""
         try:
             converter = ConversionManager(
+                console=console,
                 dataset_dir=input_path,
                 output_dir=output_path,
                 to_format=to_format,
@@ -155,43 +149,49 @@ class DatasetOperations:
             converter.convert()
 
             if not converter.format_check(output_path, to_format):
-                print(f"[bold red]❌ Conversion completed but format check failed at:[/bold red] {output_path}")
+                console.print(f"[bold red]❌ Conversion completed but format check failed at:[/bold red] {output_path}")
                 return
 
-            print(f"[bold green]✅ Converted to {to_format} in {output_path}[/bold green]")
+            console.print(f"[bold green]✅ Converted to {to_format} in {output_path}[/bold green]")
 
         except Exception as e:
-            print(f"[bold red]❌ An error occurred during conversion:[/bold red] {e}")
-
-    @staticmethod
-    def download_dataset(url: str, output_path: Path) -> None:
-        """Download dataset from URL."""
-        try:
-            download(url, output_path)
-
-            if not download_check(output_path):
-                print(f"[bold red]❌ Download completed but dataset check failed at:[/bold red] {output_path}")
-                return
-
-            print(f"[bold magenta]✅ Downloaded dataset from {url} to {output_path}[/bold magenta]")
-
-        except Exception as e:
-            print(f"[bold red]❌ An error occurred during download:[/bold red] {e}")
+            console.print(f"[bold red]❌ An error occurred during conversion:[/bold red] {e}")
 
     @staticmethod
     def filter_dataset(input_path: Path, output_path: Path, filter_criteria: str) -> None:
         """Filter dataset based on criteria."""
         try:
-            filter(input_path, output_path, filter_criteria)
+            filter = FilterManager(
+                console=console,
+                input_path=input_path,
+                output_path=output_path,
+                criteria=filter_criteria,
+            )
+            filter.apply_filters()
 
-            if not filter_check(output_path, filter_criteria):
-                print(f"[bold red]❌ Filtering completed but check failed at:[/bold red] {output_path}")
+            if not filter.check_filters(output_path):
+                console.print(f"[bold red]❌ Filtering completed but check failed at:[/bold red] {output_path}")
                 return
 
-            print(f"[bold green]✅ Filtered dataset at {input_path} and saved to {output_path}[/bold green]")
+            console.print(f"[bold green]✅ Filtered dataset at {input_path} and saved to {output_path}[/bold green]")
 
         except Exception as e:
-            print(f"[bold red]❌ An error occurred during filtering:[/bold red] {e}")
+            console.print(f"[bold red]❌ An error occurred during filtering:[/bold red] {e}")
+
+    @staticmethod
+    def download_dataset(url: str, output_path: Path) -> None:
+        """Download dataset from URL."""
+        try:
+            download(console, url, output_path)
+
+            if not download_check(output_path):
+                console.print(f"[bold red]❌ Download completed but dataset check failed at:[/bold red] {output_path}")
+                return
+
+            console.print(f"[bold magenta]✅ Downloaded dataset from {url} to {output_path}[/bold magenta]")
+
+        except Exception as e:
+            console.print(f"[bold red]❌ An error occurred during download:[/bold red] {e}")
 
     @staticmethod
     def visualize_dataset(input_path: Path) -> None:
@@ -200,7 +200,6 @@ class DatasetOperations:
             import fiftyone as fo
 
             print(f"[blue]🔍 Visualizing[/blue] dataset at {input_path}")
-            format, framework = detect_format(input_path)
             # fiftyone expects a specific dataset type so we need to convert from here
             dataset = fo.Dataset.from_dir(data_path=input_path, dataset_type=fo.types.FiftyOneImageDetectionDataset)
             session = fo.launch_app(dataset)
@@ -220,9 +219,9 @@ class CommandHandlers:
         self.ops = DatasetOperations()
         self.filter_criteria = FilterCriteria()
 
-    def handle_convert(self, console: Console) -> None:
+    def handle_convert(self) -> None:
         """Handle conversion workflow."""
-        input_path, output_path = self.ui.get_directory_io(console)
+        input_path, output_path = self.ui.get_directory_io()
         console.print(
             Panel.fit(
                 "[bold yellow]🔄 You selected: Convert[/bold yellow]\n"
@@ -236,13 +235,13 @@ class CommandHandlers:
         console.print(f"[bold green]🔄 Converting annotations:[/bold green] [bold blue]{to_format} to {to_framework} in {output_path}[/bold blue]")
         self.ops.convert_annotations(input_path, output_path, to_format, to_framework, copy_images)
 
-    def handle_filter(self, console: Console) -> None:
+    def handle_filter(self) -> None:
         """Handle filtering workflow."""
-        input_path, output_path = self.ui.get_directory_io(console)
+        input_path, output_path = self.ui.get_directory_io()
 
         console.print(
             Panel.fit(
-                "[bold green]🧹 You selected: Filter[/bold green]\n" "[dim]Filter the dataset by criteria such as size, class, or category.[/dim]",
+                "[bold green]🧹 You selected: Filter[/bold green]\n" "[dim]Filter the dataset by criteria such as size or class.[/dim]",
                 border_style="bold",
             )
         )
@@ -251,11 +250,11 @@ class CommandHandlers:
         criteria_list = []
         filter_sequence = []
         while True:
-            self.ui.print_filter_menu(console)
+            self.ui.print_filter_menu()
             filter_type = self.ui.choice("\nSelect filter type", list(self.filter_criteria.COLOR_MAP.keys()))
             color = self.filter_criteria.COLOR_MAP[filter_type]
             filter_sequence.append(f"[bold {color}]{filter_type}[/bold {color}]")
-            criteria_list.append(self.filter_criteria.get_criteria(filter_type, console))
+            criteria_list.append(self.filter_criteria.get_criteria(filter_type))
             console.print(Panel.fit(f"[bold green]🧹 Applying filters:[/bold green] " + ", ".join(filter_sequence), border_style="bold"))
             if not typer.confirm("Add another filter?", default=False):
                 break
@@ -268,7 +267,7 @@ class CommandHandlers:
         console.print(f"[bold green]🧹 Filtering with criteria:[/bold green] [bold blue]{full_criteria}[/bold blue]")
         self.ops.filter_dataset(input_path, output_path, full_criteria)
 
-    def handle_download(self, console: Console) -> None:
+    def handle_download(self) -> None:
         """Handle download workflow."""
         console.print(
             Panel.fit(
@@ -281,7 +280,7 @@ class CommandHandlers:
         output_path = typer.prompt("Enter output directory", default="data/")
         self.ops.download_dataset(ALLPLANES_DATASET_URL, Path(output_path))
 
-    def handle_visualize(self, console: Console) -> None:
+    def handle_visualize(self) -> None:
         """Handle visualization workflow."""
         console.print(
             Panel.fit(
@@ -297,18 +296,8 @@ class CommandHandlers:
 @app.command()
 def main():
     """Interactive menu for dataset operations: convert, download, or filter."""
-    console = Console()
     ui = UIHelper()
     handlers = CommandHandlers()
-
-    # Display welcome message
-    console.print(
-        Panel.fit(
-            "[bold blue]     ✈️  Welcome to AllPlanes Dataset Tool ✈️[/bold blue]\n" "[dim]This CLI tool helps manage the AllPlanes dataset.[/dim]",
-            border_style="bold blue",
-            padding=(1, 20),
-        )
-    )
 
     # Display menu options
     console.print("[bold]Choose an action:[/bold]")
@@ -320,10 +309,10 @@ def main():
     # Get user choice and execute handler
     action = ui.choice("What would you like to do?", ["convert", "filter", "download", "visualize"])
     handler_map = {
-        "convert": lambda: handlers.handle_convert(console),
-        "filter": lambda: handlers.handle_filter(console),
-        "download": lambda: handlers.handle_download(console),
-        "visualize": lambda: handlers.handle_visualize(console),
+        "convert": handlers.handle_convert,
+        "filter": handlers.handle_filter,
+        "download": handlers.handle_download,
+        "visualize": handlers.handle_visualize,
     }
     handler_map.get(action)()
 

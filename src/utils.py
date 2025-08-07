@@ -1,7 +1,7 @@
-from pathlib import Path
 from rich.console import Console
-from scipy.spatial import distance
-import numpy as np
+from pathlib import Path
+import pandas as pd
+import json
 
 
 def validate_dataset_path(console: Console, path: Path) -> bool:
@@ -34,44 +34,63 @@ def validate_dataset_path(console: Console, path: Path) -> bool:
     return True
 
 
-def distance_line_point(line, point):
-    line = np.array(line)
-    point = np.array(point)[:2]
-    dist = np.linalg.norm(np.cross(line[1] - line[0], line[0] - point)) / np.linalg.norm(line[1] - line[0])
-    return dist
+def load_classes(console: Console, path: Path) -> dict:
+    """Load class names from a text file and return a mapping."""
+    if not path.exists() or not path.is_file():
+        console.print(f"❌ Class file not found: {path}")
+        return {}
+    try:
+        with open(path, "r") as f:
+            names = [line.strip() for line in f if line.strip()]
+        return {name: idx for idx, name in enumerate(names)}
+    except Exception as e:
+        console.print(f"❌ Failed to load class names: {e}")
+        return {}
 
 
-def get_distance_sum(polygon, corners):
-    distance_sum = 0
-    for i in range(4):
-        line = [corners[i], corners[(i + 1) % 4]]
-        distance_sum += min([distance_line_point(line, point) for point in polygon])
-    return distance_sum
+def load_class_info(console: Console, path: Path) -> pd.DataFrame:
+    """Load class information from a JSON file."""
+    if not path.exists() or not path.is_file():
+        console.print(f"❌ Class info file not found: {path}")
+        return pd.DataFrame()
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        return pd.DataFrame(data)
+    except Exception as e:
+        console.print(f"❌ Failed to load class info: {e}")
+        return pd.DataFrame()
 
 
-def Poly2OBB(polygon):
-    polygon = np.array(polygon)[:, :2]
-    dist = distance.cdist(polygon, polygon, "euclidean")
-    major_axis = np.unravel_index(np.argmax(dist, axis=None), dist.shape)
-    minor_axis = tuple([x for x in range(4) if x not in major_axis])
-    minor_vec = polygon[minor_axis[1]] - polygon[minor_axis[0]]
-    major_axis_endpoints = [polygon[major_axis[0]], polygon[major_axis[1]]]
-    corners = [
-        major_axis_endpoints[0] + minor_vec // 2,
-        major_axis_endpoints[1] + minor_vec // 2,
-        major_axis_endpoints[1] - minor_vec // 2,
-        major_axis_endpoints[0] - minor_vec // 2,
-    ]
-
-    distance_sum = get_distance_sum(polygon, corners)
-    if distance_sum > 20:
-        major_axis, minor_axis = minor_axis, major_axis
-        minor_vec = polygon[minor_axis[1]] - polygon[minor_axis[0]]
-        major_axis_endpoints = [polygon[major_axis[0]], polygon[major_axis[1]]]
-        corners = [
-            major_axis_endpoints[0] + minor_vec // 2,
-            major_axis_endpoints[1] + minor_vec // 2,
-            major_axis_endpoints[1] - minor_vec // 2,
-            major_axis_endpoints[0] - minor_vec // 2,
-        ]
-    return np.array(corners).tolist()
+def read_annotations(console: Console, root_dir: Path) -> pd.DataFrame:
+    """Read all splits (train/val/test) and return a DataFrame."""
+    records = []
+    for split in ["train", "val", "test"]:
+        ann_dir = root_dir / split / "annotations"
+        if not ann_dir.exists() or not ann_dir.is_dir():
+            console.print(f"⚠️ Skipping missing or invalid directory: {ann_dir}")
+            continue
+        ann_files = [f for f in ann_dir.glob("*.json")]
+        if not ann_files:
+            console.print(f"⚠️ No annotation files found in: {ann_dir}")
+            continue
+        for ann_file in ann_files:
+            try:
+                with open(ann_file, "r") as f:
+                    data = json.load(f)
+                labels = data.get("labels", [])
+                bboxes = data.get("bboxes", [])
+                keypoints = data.get("keypoints", [])
+                for idx, label in enumerate(labels):
+                    records.append(
+                        {
+                            "split": split,
+                            "file": ann_file.stem + ".png",
+                            "label": label,
+                            "bbox": bboxes[idx] if idx < len(bboxes) else None,
+                            "keypoints": keypoints[idx] if idx < len(keypoints) else None,
+                        }
+                    )
+            except Exception as e:
+                console.print(f"❌ Failed to read annotation {ann_file}: {e}")
+    return pd.DataFrame(records)

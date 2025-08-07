@@ -1,15 +1,62 @@
-from src.utils import Poly2OBB
+from scipy.spatial import distance
+from rich.console import Console
 from pathlib import Path
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import shutil
-import json
-import os
+import os 
+
+from src.utils import read_annotations, load_classes
 
 
-class InstanceManager:
-    """Manage single annotation instance and handle YOLO consversion."""
+def distance_line_point(line, point):
+    line = np.array(line)
+    point = np.array(point)[:2]
+    dist = np.linalg.norm(np.cross(line[1] - line[0], line[0] - point)) / np.linalg.norm(line[1] - line[0])
+    return dist
+
+
+def get_distance_sum(polygon, corners):
+    distance_sum = 0
+    for i in range(4):
+        line = [corners[i], corners[(i + 1) % 4]]
+        distance_sum += min([distance_line_point(line, point) for point in polygon])
+    return distance_sum
+
+
+def Poly2OBB(polygon):
+    polygon = np.array(polygon)[:, :2]
+    dist = distance.cdist(polygon, polygon, "euclidean")
+    major_axis = np.unravel_index(np.argmax(dist, axis=None), dist.shape)
+    minor_axis = tuple([x for x in range(4) if x not in major_axis])
+    minor_vec = polygon[minor_axis[1]] - polygon[minor_axis[0]]
+    major_axis_endpoints = [polygon[major_axis[0]], polygon[major_axis[1]]]
+    corners = [
+        major_axis_endpoints[0] + minor_vec // 2,
+        major_axis_endpoints[1] + minor_vec // 2,
+        major_axis_endpoints[1] - minor_vec // 2,
+        major_axis_endpoints[0] - minor_vec // 2,
+    ]
+
+    # if our OBB edges dont pass very near to the polygon corners (20 pixels away or less total)
+    # we need to swap major and minor axes, this is a heuristic to ensure the OBB is a good fit
+    distance_sum = get_distance_sum(polygon, corners)
+    if distance_sum > 20:
+        major_axis, minor_axis = minor_axis, major_axis
+        minor_vec = polygon[minor_axis[1]] - polygon[minor_axis[0]]
+        major_axis_endpoints = [polygon[major_axis[0]], polygon[major_axis[1]]]
+        corners = [
+            major_axis_endpoints[0] + minor_vec // 2,
+            major_axis_endpoints[1] + minor_vec // 2,
+            major_axis_endpoints[1] - minor_vec // 2,
+            major_axis_endpoints[0] - minor_vec // 2,
+        ]
+    return np.array(corners).tolist()
+
+
+class Converter:
+    """Manage single annotation instance and YOLO conversion."""
 
     def __init__(self, file_name: str, label: str, bbox: list, keypoints: list, classes_map: dict, img_w: int, img_h: int):
         self.file_name = file_name
@@ -58,6 +105,7 @@ class ConversionManager:
 
     def __init__(
         self,
+        console: Console,
         dataset_dir: Path,
         output_dir: Path,
         to_format: str,
@@ -71,40 +119,8 @@ class ConversionManager:
         self.to_framework = to_framework.lower()
         self.copy_images = copy_images
         self.img_w, self.img_h = img_size
-
-        self.classes_map = self.load_classes(path=dataset_dir / "classes.txt")
-        self.annotations = self.read_annotations(dataset_dir)
-
-    def load_classes(self, path: Path) -> dict:
-        with open(path, "r") as f:
-            names = [line.strip() for line in f.readlines()]
-        return {name: idx for idx, name in enumerate(names)}
-
-    def read_annotations(self, root_dir: Path) -> pd.DataFrame:
-        """Read all splits (train/val/test) and return a DataFrame."""
-        records = []
-        for split in ["train", "val", "test"]:
-            ann_dir = root_dir / split / "annotations"
-            if not ann_dir.exists():
-                continue
-            ann_files = [f for f in os.listdir(ann_dir) if f.endswith(".json")]
-            for ann_file in ann_files:
-                with open(ann_dir / ann_file, "r") as f:
-                    data = json.load(f)
-                labels = data.get("labels", [])
-                bboxes = data.get("bboxes", [])
-                keypoints = data.get("keypoints", [])
-                for idx, label in enumerate(labels):
-                    records.append(
-                        {
-                            "split": split,
-                            "file": ann_file.replace(".json", ".png"),
-                            "label": label,
-                            "bbox": bboxes[idx] if idx < len(bboxes) else None,
-                            "keypoints": keypoints[idx] if idx < len(keypoints) else None,
-                        }
-                    )
-        return pd.DataFrame(records)
+        self.classes_map = load_classes(console, path=dataset_dir / "classes.txt")
+        self.annotations = read_annotations(console, dataset_dir)
 
     def convert(self) -> pd.DataFrame:
         """Convert annotations to YOLO format, write txt, and return full DataFrame with yolo_line."""
@@ -126,7 +142,7 @@ class ConversionManager:
                 lines = []
 
                 for idx, row in inst_df.iterrows():
-                    inst = InstanceManager(
+                    inst = Converter(
                         file_name=row["file"],
                         label=row["label"],
                         bbox=row["bbox"],
@@ -171,8 +187,8 @@ class ConversionManager:
 
 if __name__ == "__main__":
     conv = ConversionManager(
-        dataset_dir=Path("../data/example"),
-        output_dir=Path("../output"),
+        dataset_dir=Path("data/example"),
+        output_dir=Path("output"),
         to_format="obb",  # or "hbb"/"pose"
         to_framework="yolo",
         copy_images=True,
