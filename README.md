@@ -20,12 +20,21 @@ Toolkit for managing aircraft detection datasets, with support for format conver
 
 ```
 AllPlanes/
-├── AllPlanes.csv          # Aircraft metadata
+├── main.py                # CLI entry point
 ├── classes.txt            # ICAO codes
-└── data/example/
-    ├── train/val/test/
+├── requirements.txt       # Python dependencies
+└── data/
+  ├── AllPlanes.csv        # Aircraft metadata
+  └── example/
+    ├── train/
     │   ├── images/        # PNG images
     │   └── annotations/   # JSON annotations
+    ├── val/
+    │   ├── images/
+    │   └── annotations/
+    └── test/
+      ├── images/
+      └── annotations/
 ```
 
 ## 📝 Annotation Formats
@@ -45,7 +54,7 @@ AllPlanes/
 
 * `labels`: ICAO codes
 * `bboxes`: `[x_min, y_min, x_max, y_max]`
-* `keypoints`: Four `[x, y, v]` entries per object (corners with visibility)
+* `keypoints`: Four `[x, y, v]` entries per object (keypoints of nose, tail, and wingtips)
 
 ### YOLO Formats
 
