@@ -1,7 +1,3 @@
-Here’s a cleaner and more professional version of your README:
-
----
-
 # AllPlanes Dataset Utility
 
 <p align="center">
@@ -94,9 +90,9 @@ Filter dataset by aircraft class or size:
   <img src="refs/filter.png" alt="Filtering Example">
 </p>
 
-## 📄 License
+## 📄 Citations
 
-MIT License
+Bibtex
 
 ---
 
